@@ -1,3 +1,22 @@
+# Copyright 2022, by Sean Workman. All rights reserved.
+#
+# This file is part of the Biopython distribution and governed by your
+# choice of the "Biopython License Agreement" or the "BSD 3-Clause License".
+# Please see the LICENSE file that should have been included as part of this
+# package.
+#
+# AFDB.py
+#
+# A tool for tracking changes in the AlphaFold Protein Structure Database.
+#
+# (c) 2024 Joshua Palces
+#
+#
+#
+# It may be distributed freely with respect to the original authors.
+# Any maintainer of the Biopython code may change this notice
+# when appropriate.
+
 """Access to AlphaFold predictions."""
 
 import argparse
@@ -17,7 +36,12 @@ from urllib.request import urlcleanup
 
 
 class AFDB:
-    """Docstring still needs to be completed."""
+    """
+    Provides access to AlphaFold Protein Structure Database (AFDB) for downloading predictions.
+
+    This class enables bulk and individual downloads of AlphaFold2 (AF2) predicted protein structures.
+    The downloads can be made from the European Bioinformatics Institute (EBI) FTP server.
+    """
 
     def __init__(
         self,
@@ -28,11 +52,25 @@ class AFDB:
         verbose=True,
     ):
         """
-        Docstring needs to be completed.
-
         A class that provides access to both bulk downloads and individual downloads of
         AF2 predictions.
+
+        :param server: URL of the AFDB FTP server. Default is "ftp://ftp.ebi.ac.uk"
+        :type server: str
+
+        :param version: Version of the AFDB database. Default is "latest"
+        :type version: str
+
+        :param afdb: Local directory to store AFDB files. Default is the current working directory
+        :type afdb: str
+
+        :param file_format: Format of the files to download. Default is "mmcif"
+        :type file_format: str
+
+        :param verbose: Enable or disable verbose output. Default is True
+        :type verbose: bool
         """
+
         # Set server and version. For now there is only one server but this leaves the possibility
         # of regionally hosted servers in the future. I don't know why someone would want to access
         # older versionfs of the database, but version option allows for that.
@@ -50,9 +88,10 @@ class AFDB:
 
     def get_metadata(self):
         """
-        Docstring needs to be completed.
-
         Downloads and parses the AFDB metadata JSON file.
+
+        :return: Metadata as a dictionary
+        :rtype: dict
         """
         url = self.afdb_server + "/pub/databases/alphafold/download_metadata.json"
         if self._verbose:
@@ -66,14 +105,24 @@ class AFDB:
         self, species, pdir=None, file_format=None, overwrite=False, decompress=True
     ):
         """
-        Docstring needs to be completed.
-
-        Provides an interface to download AF2 predictions in bulk for species that
+        Downloads AF2 predictions in bulk for species that
         have tarballs provided on the FTP server.
+
+        :param species: Name of the species to download predictions for.
+        :type species: str
+        :param pdir: Directory to save the downloaded files (default: local AFDB directory).
+        :type pdir: str
+        :param file_format: Format of the files to download (default: instance's file_format).
+        :type file_format: str
+        :param overwrite: If True, overwrite existing files (default: False).
+        :type overwrite: bool
+        :param decompress: If True, decompress downloaded files (default: True).
+        :type decompress: bool
+        :return: Path to the directory containing the downloaded files.
+        :rtype: str
         """
         # Set file format
-        # Need to sort out keeping both
-        file_format = self.file_format.lower()
+        file_format = self.file_format.lower() if file_format is None else file_format.lower()
 
         # Retrieve metadata
         afdb_metadata = self.get_metadata()
@@ -103,14 +152,13 @@ class AFDB:
         final_directory = os.path.join(path, species_dir)
 
         # Skip download if the directory already exists
-        if not overwrite:
-            if os.path.exists(final_directory):
-                if self._verbose:
-                    print(
-                        f"AlphaFold2 bulk download directory for {species} "
-                        f"already exists at: {final_directory}."
-                    )
-                return final_directory
+        if not overwrite and os.path.exists(final_directory):
+            if self._verbose:
+                print(
+                    f"AlphaFold2 bulk download directory for {species} "
+                    f"already exists at: {final_directory}."
+                )
+            return final_directory
 
         # Make directory if it doesn't exist
         if not os.path.exists(final_directory):
@@ -118,31 +166,43 @@ class AFDB:
 
         # Retrieve the tarball
         if self._verbose:
-            idx = self.afdb_server.find("://")
+            print(f"Connecting to FTP server at {self.afdb_server}...")
+
+        idx = self.afdb_server.find("://")
         if idx >= 0:
-            ftp = ftplib.FTP(self.afdb_server[idx + 3 :])
+            ftp_server = self.afdb_server[idx + 3:]
         else:
-            ftp = ftplib.FTP(self.afdb_server)
-        ftp.login()
-        ftp.cwd("/pub/databases/alphafold/latest/")
+            ftp_server = self.afdb_server
 
-        with tempfile.NamedTemporaryFile() as tmpfile:
-            if self._verbose:
-                print(
-                    f"Bulk downloading AlphaFold2 predicted structures for {species} in {file_format} format..."
-                )
-            ftp.retrbinary("RETR " + archive_file, tmpfile.write)
-            tar = tarfile.open(os.path.abspath(tmpfile.name))
-            tar.extractall(final_directory)
+        with ftplib.FTP(ftp_server) as ftp:
+            ftp.login()
+            ftp.cwd("/pub/databases/alphafold/latest/")
+            with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+                if self._verbose:
+                    print(
+                        f"Bulk downloading AlphaFold2 predicted structures for {species} in {file_format} format..."
+                    )
+                ftp.retrbinary("RETR " + archive_file, tmpfile.write)
 
-        ftp.quit()
+            # Debugging: print the first few bytes of the downloaded file
+            with open(tmpfile.name, 'rb') as file:
+                print(file.read(100))
+
+            try:
+                with tarfile.open(tmpfile.name, mode='r:gz') as tar:
+                    tar.extractall(final_directory)
+            except tarfile.ReadError:
+                print(f"Error: The file {tmpfile.name} is not a valid gzip file.")
+                os.remove(tmpfile.name)
+                raise
 
         if decompress:
             for model in os.listdir(final_directory):
                 file = os.path.join(final_directory, model)
-                with gzip.open(file, "rb") as gz:
-                    with open(file[:-3], "wb") as final_file:
-                        shutil.copyfileobj(gz, final_file)
+                if file.endswith(".gz"):
+                    with gzip.open(file, "rb") as gz:
+                        with open(file[:-3], "wb") as final_file:
+                            shutil.copyfileobj(gz, final_file)
                     os.remove(file)
 
         if file_format == "mmcif":
@@ -158,13 +218,28 @@ class AFDB:
 
         return final_directory
 
+
+
     def retrieve_swissprot(
         self, pdir=None, file_format=None, overwrite=False, decompress=True
     ):
         """
-        Docstring needs to be completed.
-
         Provides an interface to download AF2 predictions in bulk for SwissProt.
+
+        :param pdir: Directory to save the downloaded files. Default is the local_afdb directory
+        :type pdir: str
+
+        :param file_format: Format of the files to download. Default is the instance's file_format
+        :type file_format: str
+
+        :param overwrite: If True, overwrite existing files. Default is False
+        :type overwrite: bool
+
+        :param decompress: If True, decompress the downloaded files. Default is True
+        :type decompress: bool
+
+        :return: Path to the directory containing the downloaded files
+        :rtype: str
         """
         # Set file format
         file_format = self.file_format.lower()
@@ -228,9 +303,19 @@ class AFDB:
 
     def retrieve_mane(self, pdir=None, overwrite=False, decompress=True):
         """
-        Docstring needs to be completed.
+        Download AF2 predictions in bulk for the MANE Select dataset.
 
-        Provides an interface to download MANE Select dataset.
+        :param pdir: Directory to save the downloaded files. Default is the local_afdb directory
+        :type pdir: str
+
+        :param overwrite: If True, overwrite existing files. Default is False
+        :type overwrite: bool
+
+        :param decompress: If True, decompress the downloaded files. Default is True
+        :type decompress: bool
+
+        :return: Path to the directory containing the downloaded files
+        :rtype: str
         """
         # Where do the files get saved
         if pdir is None:
@@ -285,10 +370,23 @@ class AFDB:
         self, uniprot_id, pdir=None, file_format=None, overwrite=False
     ):
         """
-        Docstring needs to be completed.
-
         Provides an interface to download individual AF2 predictions by
         UniProt ID.
+
+        :param uniprot_id: UniProt ID of the prediction to download
+        :type uniprot_id: str
+
+        :param pdir: Directory to save the downloaded files. Default is the local_afdb directory
+        :type pdir: str
+
+        :param file_format: Format of the files to download. Default is the instance's file_format
+        :type file_format: str
+
+        :param overwrite: If True, overwrite existing files. Default is False
+        :type overwrite: bool
+
+        :return: Path to the file containing the downloaded prediction
+        :rtype: str
         """
         # Set file format
         file_format = self.file_format.lower()
